@@ -61,21 +61,57 @@
     const log = (...a) => console.log('%c[AutoMint]', 'color:#f90;font-weight:bold', ...a);
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-    // ========== 查找 Mint 按钮 ==========
+    // ========== 查找 FAIR 项目的 Mint 按钮 ==========
     function findMintButton() {
-      const all = document.querySelectorAll('button');
-      for (const btn of all) {
-        if (btn.closest('#am-panel')) continue;
-        const rect = btn.getBoundingClientRect();
-        if (rect.width === 0 || rect.height === 0) continue;
-        if (btn.disabled) continue;
+      // 策略: 先找包含 "FAIR" 文字的卡片/容器，再在其中找 mint 按钮
+      const allElements = document.querySelectorAll('*');
+      let fairContainer = null;
 
-        const text = (btn.innerText || btn.textContent || '').trim().toLowerCase();
-        // "MINT 100" or just "mint"
-        if (text.match(/^mint(\s+\d+)?$/)) {
-          return btn;
+      // 方法1: 找包含 "FAIR" 文字（且不是整个页面）的最小容器
+      for (const el of allElements) {
+        if (el.closest('#am-panel')) continue;
+        const text = (el.innerText || el.textContent || '').trim();
+        // 找到直接包含 "FAIR" 且文字不太长的元素（卡片标题）
+        if (text === 'FAIR' || text === 'fair') {
+          // 往上找父容器（卡片级别）
+          fairContainer = el.closest('[class*="card"], [class*="item"], [class*="token"], [class*="row"], section, article') || el.parentElement?.parentElement?.parentElement;
+          if (fairContainer) break;
         }
       }
+
+      // 如果找到 FAIR 容器，在其中找 mint 按钮
+      if (fairContainer) {
+        const btns = fairContainer.querySelectorAll('button');
+        for (const btn of btns) {
+          if (btn.closest('#am-panel')) continue;
+          const rect = btn.getBoundingClientRect();
+          if (rect.width === 0 || rect.height === 0) continue;
+          if (btn.disabled) continue;
+          const text = (btn.innerText || btn.textContent || '').trim().toLowerCase();
+          if (text.match(/^mint(\s+\d+)?$/) || (text.includes('mint') && !text.includes('another') && text.length < 20)) {
+            return btn;
+          }
+        }
+      }
+
+      // 方法2: 如果页面已经进入了 FAIR 详情页（只有一个 mint 按钮）
+      // 检查页面上是否有 "FAIR" 文字且只有一个 mint 按钮
+      const pageText = document.body?.innerText || '';
+      if (pageText.includes('FAIR') && pageText.includes('c4a678d6d674')) {
+        // 确认我们在 FAIR 页面内
+        const allBtns = document.querySelectorAll('button');
+        for (const btn of allBtns) {
+          if (btn.closest('#am-panel')) continue;
+          const rect = btn.getBoundingClientRect();
+          if (rect.width === 0 || rect.height === 0) continue;
+          if (btn.disabled) continue;
+          const text = (btn.innerText || btn.textContent || '').trim().toLowerCase();
+          if (text.match(/^mint(\s+\d+)?$/) || (text.includes('mint') && !text.includes('another') && text.length < 20)) {
+            return btn;
+          }
+        }
+      }
+
       return null;
     }
 
