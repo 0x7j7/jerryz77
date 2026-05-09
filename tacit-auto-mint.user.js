@@ -35,32 +35,19 @@
   const log = (...a) => console.log('%c[AutoMint]', 'color:#f90;font-weight:bold', ...a);
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-  // ========== 元素查找 ==========
-
-  /**
-   * 查找确认弹窗中的"确定"按钮
-   * 弹窗内容: "Mint 100 FAIR?" + 费用说明 + [取消] [确定]
-   */
-  function findConfirmButton() {
-    // 查找所有按钮，找文案是"确定"/"确认"/"OK"/"Confirm"的
-    const candidates = document.querySelectorAll('button, [role="button"], input[type="button"]');
-    for (const el of candidates) {
-      if (!(el instanceof HTMLElement)) continue;
-      if (el.closest('#am-panel')) continue;
-
-      const rect = el.getBoundingClientRect();
-      if (rect.width === 0 || rect.height === 0) continue;
-      if (el.hasAttribute('disabled')) continue;
-
-      const text = (el.innerText || el.textContent || el.value || '').trim().toLowerCase();
-      // 匹配各种确认按钮文案
-      if (text === '确定' || text === '确认' || text === 'ok' || text === 'confirm' ||
-          text === 'yes' || text === '同意' || text === 'approve') {
-        return el;
-      }
+  // ========== 劫持 window.confirm 自动返回 true ==========
+  // 弹窗 "Mint 100 FAIR?" 是浏览器原生 confirm()，劫持后自动确认
+  let autoConfirm = false;
+  const originalConfirm = window.confirm.bind(window);
+  window.confirm = function (msg) {
+    if (autoConfirm) {
+      log('  ✓ 自动确认弹窗:', msg);
+      return true;
     }
-    return null;
-  }
+    return originalConfirm(msg);
+  };
+
+  // ========== 元素查找 ==========
 
   /**
    * 查找 "Mint another?" 链接
@@ -104,7 +91,9 @@
       if (el.offsetParent === null && el.style.position !== 'fixed') continue;
 
       const text = (el.innerText || el.textContent || el.value || '').trim().toLowerCase();
-      if ((text === 'mint' || (text.includes('mint') && !text.includes('another') && text.length < 20))) {
+      // 匹配 "mint", "mint 100", "mint 50" 等，但排除 "mint another"
+      if (text === 'mint' || (text.match(/^mint\s*\d*$/) && text.length < 20) ||
+          (text.includes('mint') && !text.includes('another') && text.length < 20)) {
         return el;
       }
     }
@@ -113,25 +102,42 @@
 
   // ========== 点击逻辑 ==========
 
+  /**
+   * 使用多种方式模拟真实用户点击
+   * 关键: 框架(React/Svelte等)通常监听 mousedown→mouseup→click 完整序列
+   */
   function realClick(el) {
     log('  → 点击:', el.tagName, `"${(el.innerText || '').trim().substring(0, 30)}"`);
     el.scrollIntoView({ block: 'center' });
 
-    // 方式1: 原生 .click()
-    el.click();
+    const rect = el.getBoundingClientRect();
+    const x = rect.left + rect.width / 2;
+    const y = rect.top + rect.height / 2;
 
-    // 方式2: 完整鼠标事件（兜底）
-    setTimeout(() => {
-      const rect = el.getBoundingClientRect();
-      const x = rect.left + rect.width / 2;
-      const y = rect.top + rect.height / 2;
-      ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach((type) => {
-        el.dispatchEvent(new MouseEvent(type, {
-          bubbles: true, cancelable: true, view: window,
-          clientX: x, clientY: y,
-        }));
-      });
-    }, 50);
+    // 先聚焦元素
+    el.focus();
+
+    // 派发完整的指针和鼠标事件序列（模拟真实用户交互）
+    const eventInit = {
+      bubbles: true,
+      cancelable: true,
+      view: window,
+      clientX: x,
+      clientY: y,
+      screenX: x,
+      screenY: y,
+      button: 0,
+      buttons: 1,
+    };
+
+    el.dispatchEvent(new PointerEvent('pointerdown', { ...eventInit, pointerId: 1, pointerType: 'mouse' }));
+    el.dispatchEvent(new MouseEvent('mousedown', eventInit));
+    el.dispatchEvent(new PointerEvent('pointerup', { ...eventInit, pointerId: 1, pointerType: 'mouse', buttons: 0 }));
+    el.dispatchEvent(new MouseEvent('mouseup', { ...eventInit, buttons: 0 }));
+    el.dispatchEvent(new MouseEvent('click', { ...eventInit, buttons: 0 }));
+
+    // 兜底: 原生 .click()
+    setTimeout(() => { el.click(); }, 30);
   }
 
   // ========== 等待逻辑 ==========
@@ -152,30 +158,29 @@
   async function oneRound(interval) {
     log(`--- 第 ${doneCount + 1} 轮 ---`);
 
-    // 步骤1: 点击 Mint
+    // 步骤1: 点击 Mint（开启自动确认，因为 confirm() 是同步的会在 click 里触发）
     updateStatus(`第 ${doneCount + 1} 轮: 寻找 Mint 按钮...`);
     const mintBtn = await waitFor(findMintButton, 'Mint 按钮');
-    await sleep(200);
-    realClick(mintBtn);
-
-    // 步骤2: 点击确认弹窗的"确定"按钮
-    updateStatus(`第 ${doneCount + 1} 轮: 等待确认弹窗...`);
-    log('步骤2: 等待确认弹窗...');
-    const confirmBtn = await waitFor(findConfirmButton, '确定按钮', 10_000);
     await sleep(300);
     if (stopFlag) throw new Error('用户停止');
-    log('步骤2: 点击确定');
-    realClick(confirmBtn);
 
-    // 步骤3: 等 "Mint another?" 出现（交易自动完成）
+    // 开启自动确认 - confirm() 弹窗会自动返回 true
+    autoConfirm = true;
+    log('步骤1: 点击 Mint（自动确认已开启）');
+    realClick(mintBtn);
+
+    // 步骤2: 等 "Mint another?" 出现（交易自动完成）
     updateStatus(`第 ${doneCount + 1} 轮: 等待交易完成...`);
-    log('步骤3: 等待交易完成...');
+    log('步骤2: 等待交易完成...');
     const mintAnotherEl = await waitFor(findMintAnotherLink, 'Mint another?');
 
-    // 步骤4: 点 "Mint another?"
+    // 关闭自动确认
+    autoConfirm = false;
+
+    // 步骤3: 点 "Mint another?"
     await sleep(interval);
     if (stopFlag) throw new Error('用户停止');
-    log('步骤4: 点击 Mint another?');
+    log('步骤3: 点击 Mint another?');
     realClick(mintAnotherEl);
 
     doneCount += 1;
