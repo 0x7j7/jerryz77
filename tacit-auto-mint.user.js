@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Tacit Finance Auto Mint FAIR
 // @namespace    https://github.com/jerryz77
-// @version      0.3.0
-// @description  全自动循环 mint FAIR（网站内置钱包，无需手动确认）
+// @version      0.4.0
+// @description  全自动循环 mint FAIR（含自动点确认弹窗）
 // @match        https://tacit.finance/*
 // @match        https://*.tacit.finance/*
 // @run-at       document-idle
@@ -15,9 +15,9 @@
  * 2. 新建脚本，粘贴保存
  * 3. 打开 https://tacit.finance/#tab=discover ，登录网站钱包，进入 FAIR mint 页面
  * 4. 右下角面板点 Start，全自动循环：
- *      点 Mint → 等交易完成 → 点 "Mint another?" → 重复
+ *      点 Mint → 自动点确认弹窗 → 等交易完成 → 点 "Mint another?" → 重复
  *
- * 因为是网站内置钱包，不需要手动签名，完全自动。
+ * 流程: Mint按钮 → 确认弹窗("确定") → 交易完成 → "Mint another?" → 循环
  */
 
 (function () {
@@ -36,6 +36,31 @@
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   // ========== 元素查找 ==========
+
+  /**
+   * 查找确认弹窗中的"确定"按钮
+   * 弹窗内容: "Mint 100 FAIR?" + 费用说明 + [取消] [确定]
+   */
+  function findConfirmButton() {
+    // 查找所有按钮，找文案是"确定"/"确认"/"OK"/"Confirm"的
+    const candidates = document.querySelectorAll('button, [role="button"], input[type="button"]');
+    for (const el of candidates) {
+      if (!(el instanceof HTMLElement)) continue;
+      if (el.closest('#am-panel')) continue;
+
+      const rect = el.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) continue;
+      if (el.hasAttribute('disabled')) continue;
+
+      const text = (el.innerText || el.textContent || el.value || '').trim().toLowerCase();
+      // 匹配各种确认按钮文案
+      if (text === '确定' || text === '确认' || text === 'ok' || text === 'confirm' ||
+          text === 'yes' || text === '同意' || text === 'approve') {
+        return el;
+      }
+    }
+    return null;
+  }
 
   /**
    * 查找 "Mint another?" 链接
@@ -133,13 +158,24 @@
     await sleep(200);
     realClick(mintBtn);
 
-    // 步骤2: 等 "Mint another?" 出现（交易自动完成）
+    // 步骤2: 点击确认弹窗的"确定"按钮
+    updateStatus(`第 ${doneCount + 1} 轮: 等待确认弹窗...`);
+    log('步骤2: 等待确认弹窗...');
+    const confirmBtn = await waitFor(findConfirmButton, '确定按钮', 10_000);
+    await sleep(300);
+    if (stopFlag) throw new Error('用户停止');
+    log('步骤2: 点击确定');
+    realClick(confirmBtn);
+
+    // 步骤3: 等 "Mint another?" 出现（交易自动完成）
     updateStatus(`第 ${doneCount + 1} 轮: 等待交易完成...`);
+    log('步骤3: 等待交易完成...');
     const mintAnotherEl = await waitFor(findMintAnotherLink, 'Mint another?');
 
-    // 步骤3: 点 "Mint another?"
+    // 步骤4: 点 "Mint another?"
     await sleep(interval);
     if (stopFlag) throw new Error('用户停止');
+    log('步骤4: 点击 Mint another?');
     realClick(mintAnotherEl);
 
     doneCount += 1;
