@@ -220,6 +220,60 @@
       throw new Error(`超时: ${label}`);
     }
 
+    // ========== 查找卡在 "MINTING..." 状态的按钮 ==========
+    function findMintingButton() {
+      const allEls = document.body.querySelectorAll('*');
+      for (const el of allEls) {
+        if (el.closest('#am-panel')) continue;
+        if (el.children.length > 0) continue;
+        const text = (el.textContent || '').trim();
+        if (!text.includes(FAIR_ID)) continue;
+
+        let container = el.parentElement;
+        let depth = 0;
+        while (container && depth < 10) {
+          const btn = container.querySelector('button');
+          if (btn) {
+            const btnText = (btn.innerText || btn.textContent || '').trim().toLowerCase();
+            if (btnText.includes('minting')) {
+              const rect = btn.getBoundingClientRect();
+              if (rect.width > 0 && rect.height > 0) return btn;
+            }
+          }
+          container = container.parentElement;
+          depth++;
+        }
+      }
+      return null;
+    }
+
+    // ========== 等待 mint 完成，期间重试点击 MINTING... ==========
+    async function waitForMintComplete(interval) {
+      const start = Date.now();
+      let lastRetryClick = 0;
+      while (Date.now() - start < TX_TIMEOUT) {
+        if (stopFlag) throw new Error('用户停止');
+
+        // 检查是否已经出现 "Mint another?"
+        const again = findMintAnother();
+        if (again) return again;
+
+        // 如果卡在 "MINTING..."，每隔 5 秒再点一下
+        const now = Date.now();
+        if (now - lastRetryClick > 5000) {
+          const mintingBtn = findMintingButton();
+          if (mintingBtn) {
+            log('  ⟳ 发现 MINTING... 卡住，重新点击');
+            simulateClick(mintingBtn);
+            lastRetryClick = now;
+          }
+        }
+
+        await sleep(POLL_INTERVAL);
+      }
+      throw new Error('超时: Mint another?');
+    }
+
     // ========== 核心循环 ==========
     async function oneRound(interval) {
       log(`--- 第 ${doneCount + 1} 轮 ---`);
@@ -238,10 +292,10 @@
       // 给一点时间让 confirm 触发
       await sleep(500);
 
-      // 步骤2: 等 "Mint another?" 出现
+      // 步骤2: 等 "Mint another?" 出现，期间如果卡在 "MINTING..." 就再点一下
       updateStatus(`第 ${doneCount + 1} 轮: 等待交易完成...`);
       log('步骤2: 等 Mint another?...');
-      const again = await waitFor(findMintAnother, 'Mint another?');
+      const again = await waitForMintComplete(interval);
       autoConfirm = false;
 
       // 步骤3: 点 "Mint another?"
