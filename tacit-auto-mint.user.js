@@ -62,53 +62,63 @@
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
     // ========== 查找 FAIR 项目的 Mint 按钮 ==========
+    // FAIR 合约地址开头: c4a678d6d674
+    const FAIR_ID = 'c4a678d6d674';
+
     function findMintButton() {
-      // 策略: 先找包含 "FAIR" 文字的卡片/容器，再在其中找 mint 按钮
-      const allElements = document.querySelectorAll('*');
-      let fairContainer = null;
+      // 在 discover 列表页，每个代币是一个卡片/行
+      // 策略: 找到包含 FAIR 合约地址的那个容器，再在里面找 Mint 按钮
 
-      // 方法1: 找包含 "FAIR" 文字（且不是整个页面）的最小容器
-      for (const el of allElements) {
+      // 步骤1: 找到页面上包含 FAIR 合约地址文字的元素
+      const allEls = document.body.querySelectorAll('*');
+      for (const el of allEls) {
         if (el.closest('#am-panel')) continue;
-        const text = (el.innerText || el.textContent || '').trim();
-        // 找到直接包含 "FAIR" 且文字不太长的元素（卡片标题）
-        if (text === 'FAIR' || text === 'fair') {
-          // 往上找父容器（卡片级别）
-          fairContainer = el.closest('[class*="card"], [class*="item"], [class*="token"], [class*="row"], section, article') || el.parentElement?.parentElement?.parentElement;
-          if (fairContainer) break;
+        if (el.children.length > 0) continue; // 只看叶子节点（文字节点）
+        const text = (el.textContent || '').trim();
+        if (!text.includes(FAIR_ID)) continue;
+
+        // 找到了！往上找包含 mint 按钮的容器
+        // 逐层往上，直到找到一个包含 button 的容器
+        let container = el.parentElement;
+        let depth = 0;
+        while (container && depth < 10) {
+          const btn = container.querySelector('button');
+          if (btn) {
+            const btnText = (btn.innerText || btn.textContent || '').trim().toLowerCase();
+            if (btnText.match(/^mint(\s+\d+)?$/) || (btnText.includes('mint') && !btnText.includes('another') && btnText.length < 20)) {
+              if (!btn.disabled) {
+                const rect = btn.getBoundingClientRect();
+                if (rect.width > 0 && rect.height > 0) return btn;
+              }
+            }
+          }
+          container = container.parentElement;
+          depth++;
         }
       }
 
-      // 如果找到 FAIR 容器，在其中找 mint 按钮
-      if (fairContainer) {
-        const btns = fairContainer.querySelectorAll('button');
-        for (const btn of btns) {
-          if (btn.closest('#am-panel')) continue;
-          const rect = btn.getBoundingClientRect();
-          if (rect.width === 0 || rect.height === 0) continue;
-          if (btn.disabled) continue;
-          const text = (btn.innerText || btn.textContent || '').trim().toLowerCase();
-          if (text.match(/^mint(\s+\d+)?$/) || (text.includes('mint') && !text.includes('another') && text.length < 20)) {
-            return btn;
-          }
-        }
-      }
+      // 备选: 找到包含 "FAIR" 精确文字的元素旁边的按钮
+      for (const el of allEls) {
+        if (el.closest('#am-panel')) continue;
+        if (el.children.length > 0) continue;
+        const text = (el.textContent || '').trim();
+        if (text !== 'FAIR') continue;
 
-      // 方法2: 如果页面已经进入了 FAIR 详情页（只有一个 mint 按钮）
-      // 检查页面上是否有 "FAIR" 文字且只有一个 mint 按钮
-      const pageText = document.body?.innerText || '';
-      if (pageText.includes('FAIR') && pageText.includes('c4a678d6d674')) {
-        // 确认我们在 FAIR 页面内
-        const allBtns = document.querySelectorAll('button');
-        for (const btn of allBtns) {
-          if (btn.closest('#am-panel')) continue;
-          const rect = btn.getBoundingClientRect();
-          if (rect.width === 0 || rect.height === 0) continue;
-          if (btn.disabled) continue;
-          const text = (btn.innerText || btn.textContent || '').trim().toLowerCase();
-          if (text.match(/^mint(\s+\d+)?$/) || (text.includes('mint') && !text.includes('another') && text.length < 20)) {
-            return btn;
+        let container = el.parentElement;
+        let depth = 0;
+        while (container && depth < 10) {
+          const btn = container.querySelector('button');
+          if (btn) {
+            const btnText = (btn.innerText || btn.textContent || '').trim().toLowerCase();
+            if (btnText.match(/^mint(\s+\d+)?$/) || (btnText.includes('mint') && !btnText.includes('another') && btnText.length < 20)) {
+              if (!btn.disabled) {
+                const rect = btn.getBoundingClientRect();
+                if (rect.width > 0 && rect.height > 0) return btn;
+              }
+            }
           }
+          container = container.parentElement;
+          depth++;
         }
       }
 
